@@ -1,9 +1,7 @@
 name: Run Personal MTProto Proxy
 
 on:
-  workflow_dispatch:  # You run it manually when needed
-  schedule:
-    - cron: "0 */4 * * *"  # Or every 4 hours automatically
+  workflow_dispatch:
 
 jobs:
   proxy:
@@ -31,30 +29,29 @@ jobs:
           USERS = {"tg": "$SECRET"}
           EOF
       
-      - name: Start proxy server
+      - name: Get public IP and create proxy link
         run: |
-          cd mtprotoproxy
-          source venv/bin/activate
-          python3 mtprotoproxy.py &
-          
           # Get the GitHub Actions runner's public IP
           PUBLIC_IP=$(curl -s ifconfig.me)
           echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
           
-          # Keep the proxy running
-          sleep 6h  # Runs for 6 hours maximum
-      
-      - name: Send proxy link to Telegram (Optional)
-        run: |
-          # This creates your personal proxy link
-          PROXY_LINK="tg://proxy?server=${{ env.PUBLIC_IP }}&port=443&secret=${{ env.SECRET }}"
-          echo "Your personal proxy link: $PROXY_LINK"
-          
-          # Save as artifact so you can download and see the link
+          # Create the proxy link
+          PROXY_LINK="tg://proxy?server=$PUBLIC_IP&port=443&secret=${{ env.SECRET }}"
           echo "$PROXY_LINK" > proxy_link.txt
+          echo "=========================================="
+          echo "Your proxy link: $PROXY_LINK"
+          echo "=========================================="
       
-      - name: Upload proxy link
+      - name: Upload artifact (THIS CREATES THE DOWNLOAD)
         uses: actions/upload-artifact@v4
         with:
-          name: proxy-link
+          name: telegram-proxy-link
           path: proxy_link.txt
+      
+      - name: Start proxy server (runs for 6 hours)
+        run: |
+          cd mtprotoproxy
+          source venv/bin/activate
+          python3 mtprotoproxy.py &
+          echo "Proxy is running. This job will stay alive for 6 hours..."
+          sleep 6h
