@@ -1,4 +1,4 @@
-name: Telegram MTProto Proxy (Fake TLS)
+name: Telegram MTProto Proxy (Fixed)
 
 on:
   workflow_dispatch:
@@ -8,85 +8,81 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Install MTProto Proxy with Fake TLS support
+      - name: Install MTProto Proxy
         run: |
           sudo apt-get update
-          sudo apt-get install -y git python3 python3-pip
+          sudo apt-get install -y git python3 python3-pip xxd
           git clone https://github.com/alexbers/mtprotoproxy
           cd mtprotoproxy
           pip3 install cryptography
       
-      - name: Generate Fake TLS Secret and Config
+      - name: Generate Correct Fake TLS Secret
         run: |
           cd mtprotoproxy
           
-          # Generate random 16-byte secret (32 hex chars)
-          RANDOM_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(16))")
+          # Generate random 16 bytes (32 hex chars)
+          RANDOM_HEX=$(python3 -c "import secrets; print(secrets.token_hex(16))")
           
-          # Choose a Fake TLS domain that works in Iran
-          # Using cloudflare.com as it's widely allowed
+          # Internal secret: ee + 32 hex chars (TOTAL = 34 chars)
+          INTERNAL_SECRET="ee${RANDOM_HEX}"
+          
+          # Domain for masking
           FAKE_DOMAIN="varzesh3.com"
           
           # Convert domain to hex
           DOMAIN_HEX=$(echo -n "$FAKE_DOMAIN" | xxd -p -c 1000 | tr -d '\n')
           
-          # Create Fake TLS secret: ee + secret + domain_hex
-          FAKE_SECRET="ee${RANDOM_SECRET}${DOMAIN_HEX}"
+          # Published secret: internal secret + domain hex
+          PUBLISHED_SECRET="${INTERNAL_SECRET}${DOMAIN_HEX}"
           
-          echo "FAKE_SECRET=$FAKE_SECRET" >> $GITHUB_ENV
+          echo "INTERNAL_SECRET=$INTERNAL_SECRET" >> $GITHUB_ENV
+          echo "PUBLISHED_SECRET=$PUBLISHED_SECRET" >> $GITHUB_ENV
           echo "FAKE_DOMAIN=$FAKE_DOMAIN" >> $GITHUB_ENV
           
-          # Create config with Fake TLS mode
+          # IMPORTANT: config.py gets ONLY the 34-char internal secret
           cat > config.py << EOF
           PORT = 8443
-          USERS = {"tg": "$FAKE_SECRET"}
-          # Fake TLS configuration
+          USERS = {"tg": "$INTERNAL_SECRET"}
           TLS_DOMAIN = "$FAKE_DOMAIN"
           EOF
           
-          echo "Fake TLS secret created with domain: $FAKE_DOMAIN"
-          echo "Secret length: ${#FAKE_SECRET} characters"
+          echo "✅ Internal secret (34 chars): ${#INTERNAL_SECRET} chars"
+          echo "✅ Published secret length: ${#PUBLISHED_SECRET} chars"
+          echo "✅ Domain: $FAKE_DOMAIN"
       
       - name: Get Server IP
         run: |
           PUBLIC_IP=$(curl -s https://api.ipify.org)
           echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
-          echo "Server IP: $PUBLIC_IP"
       
       - name: Create Proxy Link
         run: |
-          PROXY_LINK="tg://proxy?server=${{ env.PUBLIC_IP }}&port=8443&secret=${{ env.FAKE_SECRET }}"
+          # Use PUBLISHED_SECRET (includes domain) for the link
+          PROXY_LINK="tg://proxy?server=${{ env.PUBLIC_IP }}&port=8443&secret=${{ env.PUBLISHED_SECRET }}"
           echo "$PROXY_LINK" > proxy_link.txt
           echo "============================================="
-          echo "YOUR FAKE TLS PROXY LINK:"
+          echo "YOUR PROXY LINK:"
           echo "$PROXY_LINK"
           echo "============================================="
-          echo ""
-          echo "Note the secret starts with 'ee' - this is Fake TLS mode"
       
       - name: Upload Proxy Link
         uses: actions/upload-artifact@v4
         with:
-          name: fake-tls-proxy-link
+          name: fixed-proxy-link
           path: proxy_link.txt
       
-      - name: Start Proxy Server with Fake TLS
+      - name: Start Proxy Server
         run: |
           cd mtprotoproxy
-          # Start proxy with verbose output for debugging
-          python3 mtprotoproxy.py 2>&1 | tee proxy.log &
+          python3 mtprotoproxy.py &
           PROXY_PID=$!
-          echo "PROXY_PID=$PROXY_PID" >> $GITHUB_ENV
-          
           sleep 5
           
-          # Check if running
           if ps -p $PROXY_PID > /dev/null 2>&1; then
-            echo "✅ Fake TLS Proxy is running on port 8443"
-            echo "✅ Hiding traffic as: ${{ env.FAKE_DOMAIN }}"
+            echo "✅ Proxy running on port 8443"
+            echo "✅ Internal secret: ${{ env.INTERNAL_SECRET }}"
           else
-            echo "❌ Proxy failed to start"
-            cat proxy.log
+            echo "❌ Proxy failed"
             exit 1
           fi
       
@@ -94,19 +90,15 @@ jobs:
         run: |
           echo ""
           echo "============================================="
-          echo "✅ FAKE TLS PROXY IS RUNNING!"
+          echo "✅ PROXY IS RUNNING!"
           echo "============================================="
-          echo ""
-          echo "IMPORTANT: The secret in your link starts with 'ee'"
-          echo "This is the Fake TLS format required for Iran"
           echo ""
           echo "1. Download the artifact"
           echo "2. Copy the tg:// link"
           echo "3. In Telegram: Settings → Advanced → Connection Type"
-          echo "4. Select MTProto and paste the link"
+          echo "4. Add MTProto proxy and paste the link"
           echo ""
-          echo "Domain masking as: ${{ env.FAKE_DOMAIN }}"
-          echo "Proxy will run for 6 HOURS"
+          echo "Domain: ${{ env.FAKE_DOMAIN }}"
+          echo "Proxy runs for 6 HOURS"
           echo ""
-          
           sleep 6h
