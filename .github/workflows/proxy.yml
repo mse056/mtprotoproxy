@@ -1,57 +1,103 @@
-name: Run Personal MTProto Proxy
+name: Telegram MTProto Proxy
 
 on:
   workflow_dispatch:
 
 jobs:
-  proxy:
+  run-proxy:
     runs-on: ubuntu-latest
     
     steps:
       - name: Install MTProto Proxy
         run: |
+          sudo apt-get update
+          sudo apt-get install -y git python3 python3-pip
           git clone https://github.com/alexbers/mtprotoproxy
           cd mtprotoproxy
-          python3 -m venv venv
-          source venv/bin/activate
-          pip install cryptography
+          pip3 install cryptography
       
-      - name: Generate proxy secret and config
+      - name: Generate Secret and Config
         run: |
           cd mtprotoproxy
-          # Generate a random secret
+          # Generate random secret
           SECRET=$(python3 -c "import secrets; print(secrets.token_hex(16))")
           echo "SECRET=$SECRET" >> $GITHUB_ENV
           
-          # Create config
+          # Create config file
           cat > config.py << EOF
           PORT = 443
           USERS = {"tg": "$SECRET"}
           EOF
-      
-      - name: Get public IP and create proxy link
-        run: |
-          # Get the GitHub Actions runner's public IP
-          PUBLIC_IP=$(curl -s ifconfig.me)
-          echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
           
-          # Create the proxy link
-          PROXY_LINK="tg://proxy?server=$PUBLIC_IP&port=443&secret=${{ env.SECRET }}"
-          echo "$PROXY_LINK" > proxy_link.txt
-          echo "=========================================="
-          echo "Your proxy link: $PROXY_LINK"
-          echo "=========================================="
+          echo "Config created successfully"
       
-      - name: Upload artifact (THIS CREATES THE DOWNLOAD)
+      - name: Get Server IP
+        run: |
+          PUBLIC_IP=$(curl -s https://api.ipify.org)
+          echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
+          echo "Server IP: $PUBLIC_IP"
+      
+      - name: Create Proxy Link
+        run: |
+          PROXY_LINK="tg://proxy?server=${{ env.PUBLIC_IP }}&port=443&secret=${{ env.SECRET }}"
+          echo "$PROXY_LINK" > proxy_link.txt
+          echo "============================================="
+          echo "YOUR PROXY LINK:"
+          echo "$PROXY_LINK"
+          echo "============================================="
+          echo ""
+          echo "Copy this link and save it. You will need it in Telegram."
+      
+      - name: Upload Proxy Link
         uses: actions/upload-artifact@v4
         with:
-          name: telegram-proxy-link
+          name: proxy-link
           path: proxy_link.txt
+          retention-days: 1
       
-      - name: Start proxy server (runs for 6 hours)
+      - name: Start Proxy Server
         run: |
           cd mtprotoproxy
-          source venv/bin/activate
-          python3 mtprotoproxy.py &
-          echo "Proxy is running. This job will stay alive for 6 hours..."
-          sleep 6h
+          python3 mtprotoproxy.py > proxy.log 2>&1 &
+          PROXY_PID=$!
+          echo "Proxy started with PID: $PROXY_PID"
+          echo "PROXY_PID=$PROXY_PID" >> $GITHUB_ENV
+          
+          # Wait a moment for proxy to initialize
+          sleep 5
+          
+          # Check if proxy is running
+          if ps -p $PROXY_PID > /dev/null; then
+            echo "✅ Proxy is running successfully on port 443"
+          else
+            echo "❌ Proxy failed to start"
+            cat proxy.log
+            exit 1
+          fi
+      
+      - name: Keep Proxy Alive
+        run: |
+          echo "============================================="
+          echo "✅ PROXY IS NOW RUNNING!"
+          echo "============================================="
+          echo ""
+          echo "1. Download the artifact from the Artifacts section below"
+          echo "2. Open proxy_link.txt and copy the link"
+          echo "3. In Telegram: Settings → Advanced → Connection Type"
+          echo "4. Choose 'Use Proxy' and paste the link"
+          echo ""
+          echo "This proxy will run for 6 HOURS"
+          echo "The job will stay alive until then"
+          echo ""
+          echo "Press Ctrl+C to stop early (if you see this in terminal)"
+          echo ""
+          
+          # Keep the job alive for up to 6 hours
+          # This is what keeps the proxy running
+          for i in {1..21600}; do
+            sleep 1
+            # Every minute, show a heartbeat
+            if [ $((i % 60)) -eq 0 ]; then
+              echo "[Heartbeat] Proxy running for $((i/60)) minutes..."
+            fi
+          done
