@@ -1,0 +1,60 @@
+name: Run Personal MTProto Proxy
+
+on:
+  workflow_dispatch:  # You run it manually when needed
+  schedule:
+    - cron: "0 */4 * * *"  # Or every 4 hours automatically
+
+jobs:
+  proxy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Install MTProto Proxy
+        run: |
+          git clone https://github.com/alexbers/mtprotoproxy
+          cd mtprotoproxy
+          python3 -m venv venv
+          source venv/bin/activate
+          pip install cryptography
+      
+      - name: Generate proxy secret and config
+        run: |
+          cd mtprotoproxy
+          # Generate a random secret
+          SECRET=$(python3 -c "import secrets; print(secrets.token_hex(16))")
+          echo "SECRET=$SECRET" >> $GITHUB_ENV
+          
+          # Create config
+          cat > config.py << EOF
+          PORT = 443
+          USERS = {"tg": "$SECRET"}
+          EOF
+      
+      - name: Start proxy server
+        run: |
+          cd mtprotoproxy
+          source venv/bin/activate
+          python3 mtprotoproxy.py &
+          
+          # Get the GitHub Actions runner's public IP
+          PUBLIC_IP=$(curl -s ifconfig.me)
+          echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
+          
+          # Keep the proxy running
+          sleep 6h  # Runs for 6 hours maximum
+      
+      - name: Send proxy link to Telegram (Optional)
+        run: |
+          # This creates your personal proxy link
+          PROXY_LINK="tg://proxy?server=${{ env.PUBLIC_IP }}&port=443&secret=${{ env.SECRET }}"
+          echo "Your personal proxy link: $PROXY_LINK"
+          
+          # Save as artifact so you can download and see the link
+          echo "$PROXY_LINK" > proxy_link.txt
+      
+      - name: Upload proxy link
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxy-link
+          path: proxy_link.txt
